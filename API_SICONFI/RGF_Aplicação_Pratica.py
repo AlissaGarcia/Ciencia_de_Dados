@@ -1,9 +1,13 @@
 import requests
+import pandas as pd
 import time
+from typing import List, Dict, Any
 
-# ------------------------------------------------------------
-# 1. Municípios da mesorregião do Sertão de Quixeramobim (CE)
-# ------------------------------------------------------------
+# =============================================================================
+# 1. DEFINIÇÃO DOS MUNICÍPIOS E SEUS CÓDIGOS IBGE
+# =============================================================================
+
+# Municípios da mesorregião do Sertão de Quixeramobim (CE)
 municipios = [
     {"nome": "Banabuiú", "cod_ibge": 2301851},
     {"nome": "Boa Viagem", "cod_ibge": 2302404},
@@ -14,106 +18,165 @@ municipios = [
     {"nome": "Quixeramobim", "cod_ibge": 2311405},
 ]
 
-# ------------------------------------------------------------
-# 2. Parâmetros fixos (Poder Executivo de municípios)
-# ------------------------------------------------------------
-co_poder = "E"          # Executivo
-co_esfera = "M"         # Municípios
-no_anexo = None         # Todos os anexos
+# Parâmetros fixos para todos os cenários
+poder = "E"  # Poder Executivo
+esfera = "M"  # Municípios
 
-# ------------------------------------------------------------
-# 3. Variações de período, periodicidade e tipo de demonstrativo
-# ------------------------------------------------------------
-anos = [2024, 2025]
+# Campos opcionais (para não filtrar anexos específicos)
+no_anexo = None
+co_esfera = None
+
+# Períodos e periodicidades possíveis
+# Q = quadrimestral
+# S = semestral
 periodicidades = [
-    {"tipo": "Q", "periodos": [1, 2, 3]},   # Quadrimestral
-    {"tipo": "S", "periodos": [1, 2]},      # Semestral
+    {"tipo": "Q", "periodos": [1, 2, 3]},
+    {"tipo": "S", "periodos": [1, 2]},
 ]
-tipos_demonstrativo = ["RGF", "RGF Simplificado"]
 
-# ------------------------------------------------------------
-# 4. Função para consultar a API
-# ------------------------------------------------------------
-def consultar(ano, periodicidade, periodo, tipo_demo, id_ente):
+# Tipos de demonstrativo
+tipos_demonstrativo = [
+    "RGF",
+    "RGF Simplificado"
+]
+
+# =============================================================================
+# 2. FUNÇÃO PARA CONSULTAR A API RGF
+# =============================================================================
+
+def consultar_rgf(
+    an_exercicio: int,
+    in_periodicidade: str,
+    nr_periodo: int,
+    co_tipo_demonstrativo: str,
+    co_poder: str,
+    id_ente: int,
+    no_anexo: str = None,
+    co_esfera: str = None,
+) -> List[Dict[str, Any]]:
+
+    """
+    Consulta os dados do RGF para um determinado município e período.
+    """
+
+    # Montar a URL com os parâmetros obrigatórios
     url = (
         f"https://apidatalake.tesouro.gov.br/ords/siconfi/tt/rgf"
-        f"?an_exercicio={ano}"
-        f"&in_periodicidade={periodicidade}"
-        f"&nr_periodo={periodo}"
-        f"&co_tipo_demonstrativo={tipo_demo}"
+        f"?an_exercicio={an_exercicio}"
+        f"&in_periodicidade={in_periodicidade}"
+        f"&nr_periodo={nr_periodo}"
+        f"&co_tipo_demonstrativo={co_tipo_demonstrativo}"
         f"&co_poder={co_poder}"
         f"&id_ente={id_ente}"
     )
+
+    # Adicionar parâmetros opcionais
     if no_anexo:
         url += f"&no_anexo={no_anexo}"
+
     if co_esfera:
         url += f"&co_esfera={co_esfera}"
-    
+
+    print(f"Consultando: {url}")
+
     try:
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
-        dados = resp.json()
-        return dados.get("items", [])
-    except Exception as e:
+
+        response = requests.get(url)
+
+        # Levanta exceção para erros HTTP
+        response.raise_for_status()
+
+        data = response.json()
+
+        return data.get("items", [])
+
+    except requests.exceptions.RequestException as e:
+
         print(f"Erro na consulta: {e}")
+
         return []
 
-# ------------------------------------------------------------
-# 5. Realizar todas as consultas e acumular estatísticas
-# ------------------------------------------------------------
+# =============================================================================
+# 3. REALIZAR AS CONSULTAS E CONSOLIDAR OS DADOS
+# =============================================================================
+
+# Estrutura para armazenar todos os registros coletados
+todos_registros = []
+
+# Contador de consultas realizadas
 total_consultas = 0
-total_registros = 0
-max_registros = 0
-consulta_max_desc = ""
-registros_por_municipio = {m["nome"]: 0 for m in municipios}
 
-for ano in anos:
-    for per in periodicidades:
-        for periodo in per["periodos"]:
-            for tipo in tipos_demonstrativo:
-                for mun in municipios:
+# Dicionário para armazenar a contagem de registros por consulta
+registros_por_consulta = {}
+
+# Iterar sobre todas as combinações de parâmetros
+for ano in [2024, 2025]:
+
+    for periodicidade in periodicidades:
+
+        for periodo in periodicidade["periodos"]:
+
+            for tipo_demonstrativo in tipos_demonstrativo:
+
+                for municipio in municipios:
+
+                    # Incrementa contador
                     total_consultas += 1
-                    registros = consultar(ano, per["tipo"], periodo, tipo, mun["cod_ibge"])
-                    qtd = len(registros)
-                    total_registros += qtd
-                    registros_por_municipio[mun["nome"]] += qtd
-                    
-                    if qtd > max_registros:
-                        max_registros = qtd
-                        consulta_max_desc = f"ano={ano}, per={per['tipo']}{periodo}, tipo={tipo}, mun={mun['nome']}"
-                    
-                    time.sleep(1)  # Respeitar limite da API
 
-# ------------------------------------------------------------
-# 6. Exibir respostas para o caderno
-# ------------------------------------------------------------
-print("=" * 50)
-print("RESPOSTAS PARA O CADERNO")
-print("=" * 50)
+                    # Realiza consulta
+                    registros = consultar_rgf(
+                        an_exercicio=ano,
+                        in_periodicidade=periodicidade["tipo"],
+                        nr_periodo=periodo,
+                        co_tipo_demonstrativo=tipo_demonstrativo,
+                        co_poder=poder,
+                        id_ente=municipio["cod_ibge"],
+                        no_anexo=no_anexo,
+                        co_esfera=co_esfera,
+                    )
 
-print("\n11. Como o código identifica os municípios desejados?")
-print("    -> Pelo código IBGE de cada município, fornecido no parâmetro 'id_ente'.")
+                    # Armazenar registros
+                    for reg in registros:
 
-print(f"\n12. Quantas consultas foram realizadas à API?")
-print(f"    -> {total_consultas} consultas.")
+                        reg["ano"] = ano
+                        reg["periodicidade"] = periodicidade["tipo"]
+                        reg["periodo"] = periodo
+                        reg["tipo_demonstrativo"] = tipo_demonstrativo
+                        reg["municipio_nome"] = municipio["nome"]
+                        reg["municipio_cod_ibge"] = municipio["cod_ibge"]
 
-print("\n13. Qual consulta retornou o maior número de registros e quantos registros?")
-print(f"    -> Consulta: {consulta_max_desc}")
-print(f"    -> Registros: {max_registros}")
+                        todos_registros.append(reg)
 
-print(f"\n14. Quantos registros foram coletados no total?")
-print(f"    -> {total_registros} registros.")
+                    # Registrar quantidade retornada
+                    chave_consulta = (
+                        f"{ano}-"
+                        f"{periodicidade['tipo']}-"
+                        f"{periodo}-"
+                        f"{tipo_demonstrativo}-"
+                        f"{municipio['nome']}"
+                    )
 
-print("\n15. Houve diferenças na quantidade de registros entre os municípios?")
-print("    Registros por município:")
-    for nome, qtd in registros_por_municipio.items():
-        print(f"       {nome}: {qtd}")
-    
-    if len(set(registros_por_municipio.values())) > 1:
-        print("    -> SIM, houve diferenças.")
-        print("    Possíveis causas:")
-        print("       - Municípios com menos de 50 mil habitantes podem usar RGF Simplificado (periodicidade semestral), gerando menos registros.")
-        print("       - Nem todos os municípios enviam todos os anexos ou períodos para o SICONFI.")
-        print("       - Diferenças no porte e na complexidade da gestão fiscal.")
-    else:
-        print("    -> NÃO, todos os municípios tiveram a mesma quantidade.")
+                    registros_por_consulta[chave_consulta] = len(registros)
+
+                    # Espera entre requisições
+                    time.sleep(1)
+
+# =============================================================================
+# 4. CONVERTER PARA DATAFRAME E EXPORTAR CSV
+# =============================================================================
+
+# Criar DataFrame
+df = pd.DataFrame(todos_registros)
+
+# Salvar CSV
+df.to_csv(
+    "dados_rgf_mesorregiao_sertao_quixeramobim.csv",
+    index=False,
+    encoding="utf-8-sig"
+)
+
+print(
+    f"\nArquivo "
+    f"'dados_rgf_mesorregiao_sertao_quixeramobim.csv' "
+    f"salvo com {len(df)} registros."
+)
